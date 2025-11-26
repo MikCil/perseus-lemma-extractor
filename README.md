@@ -49,7 +49,7 @@ The repository includes a single-page HTML app (`index.html`) that:
 ### How to use
 
 1. Open the GitHub Pages URL for this repo  
-   `https://mikcil.github.io/latin-lemma-extractor/`
+   https://mikcil.github.io/latin-lemma-extractor/
 2. In the **Lemmas** box, type something like:  
    `inspicio invideo`
 3. Optionally enter:
@@ -77,12 +77,14 @@ For users who prefer the command line, the same logic is available as a Python s
 
 - One lemma, all authors/works:
 
-  - `python latin_lemma_extractor.py inspicio -o inspicio_all.csv`
+```bash
+python latin_lemma_extractor.py inspicio -o inspicio_all.csv
+```
 
 - Multiple lemmas (OR), restricted to Vergil’s *Aeneid*:
 
-```python
-   `python latin_lemma_extractor.py inspicio invideo -a Vergil -t Aeneid -o aeneid_inspicio_invideo.csv`
+```bash
+   python latin_lemma_extractor.py inspicio invideo -a Vergil -t Aeneid -o aeneid_inspicio_invideo.csv`
 ```
 
 ### Command-line options
