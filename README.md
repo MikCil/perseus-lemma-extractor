@@ -81,9 +81,9 @@ For users who prefer the command line, the same logic is available as a Python s
 
 - Multiple lemmas (OR), restricted to Vergil’s *Aeneid*:
 
-'''python
+```python
    `python latin_lemma_extractor.py inspicio invideo -a Vergil -t Aeneid -o aeneid_inspicio_invideo.csv`
-'''
+```
 
 ### Command-line options
 
