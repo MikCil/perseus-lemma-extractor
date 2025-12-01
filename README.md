@@ -1,12 +1,12 @@
-# Latin Lemma Extractor
+# Latin and Ancient Greek Lemma Extractor
 
-Small web + CLI tool to extract Latin lemma concordance contexts from the UChicago PhiloLogic Latin corpus and save them as CSV.
+Small web + CLI tool to extract Latin lemma concordance contexts from the UChicago PhiloLogic corpus and save them as CSV.
 
 ## Functionality
 
 Given:
 
-- one or more Latin lemmas (OR search),
+- one or more lemmas (OR search),
 - optional **author** filter,
 - optional **work title** filter,
 
@@ -28,7 +28,7 @@ Columns:
 - `SENTENCE` – cleaned context
 - `author`
 - `title`
-- `language` – always `Latin`
+- `language` – `Latin` or `Greek`
 - `passage` – clickable URL such as  
   `https://artflsrv03.uchicago.edu/philologic4/Latin/navigate/181/1/26/1/1/?byte=77098`
 
@@ -78,13 +78,13 @@ For users who prefer the command line, the same logic is available as a Python s
 - One lemma, all authors/works:
 
 ```bash
-python latin_lemma_extractor.py inspicio -o inspicio_all.csv
+python perseus_lemma_extractor.py inspicio -L Latin -o inspicio_all.csv
 ```
 
 - Multiple lemmas (OR), restricted to Vergil’s *Aeneid*:
 
 ```bash
-   python latin_lemma_extractor.py inspicio invideo -a Vergil -t Aeneid -o aeneid_inspicio_invideo.csv`
+   python perseus_lemma_extractor.py inspicio invideo -L Latin -a Vergil -t Aeneid -o aeneid_inspicio_invideo.csv`
 ```
 
 ### Command-line options
@@ -104,7 +104,7 @@ On success, the script prints a simple message:
 ## Files in this repo
 
 - `index.html` – static web UI for GitHub Pages (front-end only).
-- `latin_lemma_extractor.py` – CLI script.
+- `perseus_lemma_extractor.py` – CLI script.
 - `README.md` – this file.
 
 ---
