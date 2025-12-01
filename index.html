@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Latin Lemma Extractor (Perseus / PhiloLogic)</title>
+  <title>Latin / Greek Lemma Extractor (Perseus / PhiloLogic)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {
@@ -93,25 +93,33 @@
 </head>
 <body>
   <header>
-    <h1>Latin Lemma Extractor (Perseus / PhiloLogic)</h1>
+    <h1>Latin / Greek Lemma Extractor (Perseus / PhiloLogic)</h1>
   </header>
   <main>
     <p class="description">
-      Enter one or more Latin lemmas (OR search), and optionally restrict by author and work title.
-      The tool will query the <em>Latin</em> PhiloLogic instance at UChicago, extract concordance
+      Enter one or more lemmas (OR search), select the corpus (Latin or Greek),
+      and optionally restrict by author and work title. The tool will query the
+      corresponding PhiloLogic instance at UChicago, extract concordance
       contexts, and download a CSV.
     </p>
 
     <form id="lemma-form">
+      <label for="language">Language:</label>
+      <select id="language" name="language">
+        <option value="Latin" selected>Latin</option>
+        <option value="Greek">Greek</option>
+      </select>
+      <div class="hint">Choose the corpus to query.</div>
+
       <label for="lemmas">Lemmas (OR):</label>
-      <textarea id="lemmas" name="lemmas" placeholder="inspicio invideo" required></textarea>
-      <div class="hint">Separate by space or comma. Example: <code>inspicio invideo</code></div>
+      <textarea id="lemmas" name="lemmas" placeholder="inspicio invideo or πόλις" required></textarea>
+      <div class="hint">Separate by space or comma. Examples: <code>inspicio invideo</code> or <code>πόλις</code>.</div>
 
       <label for="author">Author (optional):</label>
-      <input id="author" name="author" type="text" placeholder="Vergil" />
+      <input id="author" name="author" type="text" placeholder="Vergil or Xenophon" />
 
       <label for="title">Work title (optional):</label>
-      <input id="title" name="title" type="text" placeholder="Aeneid" />
+      <input id="title" name="title" type="text" placeholder="Aeneid or Anabasis" />
 
       <label for="filename">Output CSV file name:</label>
       <input id="filename" name="filename" type="text" value="output.csv" />
@@ -123,9 +131,6 @@
   </main>
 
   <script>
-    const BASE_QUERY_URL = "https://artflsrv03.uchicago.edu/philologic4/Latin/query";
-    const BASE_NAV_URL   = "https://artflsrv03.uchicago.edu/philologic4/Latin/";
-
     const form   = document.getElementById("lemma-form");
     const status = document.getElementById("status");
     const runBtn = document.getElementById("run-btn");
@@ -142,6 +147,21 @@
         .split(/[\s,]+/)
         .map(x => x.trim())
         .filter(x => x.length > 0);
+    }
+
+    function getBaseUrls(language) {
+      const lang = (language || "Latin").toLowerCase();
+      if (lang === "greek") {
+        return {
+          queryUrl: "https://artflsrv03.uchicago.edu/philologic4/Greek/query",
+          navUrl:   "https://artflsrv03.uchicago.edu/philologic4/Greek/"
+        };
+      }
+      // default: Latin
+      return {
+        queryUrl: "https://artflsrv03.uchicago.edu/philologic4/Latin/query",
+        navUrl:   "https://artflsrv03.uchicago.edu/philologic4/Latin/"
+      };
     }
 
     function buildQueryParams(lemmas, author, title, start, end) {
@@ -165,8 +185,8 @@
       return params;
     }
 
-    async function fetchJson(params) {
-      const url = `${BASE_QUERY_URL}?${params.toString()}`;
+    async function fetchJson(baseQueryUrl, params) {
+      const url = `${baseQueryUrl}?${params.toString()}`;
       const resp = await fetch(url, { method: "GET" });
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status} from server`);
@@ -204,21 +224,20 @@
       return lettersOnly.slice(0, length);
     }
 
-    function buildPassageUrl(citation_links) {
+    function buildPassageUrl(citation_links, baseNavUrl) {
       if (!citation_links) return "";
       let raw = citation_links.para || citation_links.line || citation_links.doc;
       if (!raw) return "";
       // If '?byte=' already present, ensure there's a trailing slash before '?'
       if (raw.includes("?")) {
-        const [path, query] = raw.split("?", 2);
-        const adjustedPath = path.endsWith("/") ? path : path + "/";
-        raw = `${adjustedPath}?${query}`;
+        const parts = raw.split("?", 2);
+        const path = parts[0].endsWith("/") ? parts[0] : parts[0] + "/";
+        raw = `${path}?${parts[1]}`;
       }
-      // join with base nav URL
-      return new URL(raw, BASE_NAV_URL).toString();
+      return new URL(raw, baseNavUrl).toString();
     }
 
-    function extractRows(data, lemmas) {
+    function extractRows(data, lemmas, language, baseNavUrl) {
       const results = data.results || [];
       const rows = [];
 
@@ -240,7 +259,7 @@
         const authorCode = abbreviateWord(author || "Unknown");
         const titleCode  = abbreviateWord(title || "Work");
 
-        const passageUrl = buildPassageUrl(result.citation_links || {});
+        const passageUrl = buildPassageUrl(result.citation_links || {}, baseNavUrl);
 
         const toks = (tokens.length > 0) ? tokens : [""];
 
@@ -257,7 +276,7 @@
             SENTENCE: sentence,
             author:   author,
             title:    title,
-            language: "Latin",
+            language: language,
             passage:  passageUrl
           });
         });
@@ -303,6 +322,7 @@
       runBtn.disabled = true;
 
       try {
+        const language   = document.getElementById("language").value;
         const lemmaInput = document.getElementById("lemmas").value;
         const author     = document.getElementById("author").value.trim();
         const title      = document.getElementById("title").value.trim();
@@ -314,11 +334,13 @@
           return;
         }
 
+        const { queryUrl, navUrl } = getBaseUrls(language);
+
         setStatus("Querying server (step 1 of 2)...");
 
         // Step 1: end=0 to get results_length
         const paramsInitial = buildQueryParams(lemmas, author, title, 0, 0);
-        const dataInitial   = await fetchJson(paramsInitial);
+        const dataInitial   = await fetchJson(queryUrl, paramsInitial);
         const resultsLength = parseInt(dataInitial.results_length || "0", 10) || 0;
 
         if (resultsLength === 0) {
@@ -331,9 +353,9 @@
 
         // Step 2: fetch all results
         const paramsFull = buildQueryParams(lemmas, author, title, 1, resultsLength);
-        const dataFull   = await fetchJson(paramsFull);
+        const dataFull   = await fetchJson(queryUrl, paramsFull);
 
-        const rows = extractRows(dataFull, lemmas);
+        const rows = extractRows(dataFull, lemmas, language, navUrl);
         const csv  = rowsToCsv(rows);
 
         downloadCsv(csv, filename);
