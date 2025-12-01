@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-Extract passages containing selected Latin lemmas from the Perseus / PhiloLogic
-Latin corpus and save them to a CSV file.
+Extract passages containing selected lemmas from the Perseus / PhiloLogic
+Latin or Greek corpora and save them to a CSV file.
+
+Supports:
+  - Latin: https://artflsrv03.uchicago.edu/philologic4/Latin/query
+  - Greek: https://artflsrv03.uchicago.edu/philologic4/Greek/query
 
 - Builds a query like:
-  https://artflsrv03.uchicago.edu/philologic4/Latin/query
+  https://artflsrv03.uchicago.edu/philologic4/<Language>/query
     ?report=concordance
     &method=proxy
     &colloc_filter_choice=frequency
@@ -26,17 +30,21 @@ For each hit, it extracts:
     SENTENCE  cleaned context text (HTML stripped, spacing normalized)
     author    metadata_fields["author"]
     title     metadata_fields["title"]
-    language  "Latin"
+    language  "Latin" or "Greek"
     passage   a clickable URL (paragraph-level, with byte)
 
 Usage examples:
 
-    # One lemma, all authors/works
+    # Latin, one lemma, all authors/works
     python philologic_lemmas_to_csv.py inspicio -o inspicio_all.csv
 
-    # Multiple lemmas (OR), restricted to Vergil's Aeneid
+    # Latin, multiple lemmas (OR), restricted to Vergil's Aeneid
     python philologic_lemmas_to_csv.py inspicio invideo \\
         -a Vergil -t Aeneid -o aeneid_inspicio_invideo.csv
+
+    # Greek, lemma πόλις, Xenophon Anabasis
+    python philologic_lemmas_to_csv.py πόλις \\
+        -a Xenophon -t Anabasis -L Greek -o polis_xen_anabasis.csv
 """
 
 import argparse
@@ -49,9 +57,21 @@ from urllib.parse import urljoin
 
 import requests
 
-# Base URLs for the Latin PhiloLogic instance
-BASE_QUERY_URL = "https://artflsrv03.uchicago.edu/philologic4/Latin/query"
-BASE_NAV_URL = "https://artflsrv03.uchicago.edu/philologic4/Latin/"
+# Language-dependent configuration
+LANG_CONFIG = {
+    "Latin": {
+        "query_url": "https://artflsrv03.uchicago.edu/philologic4/Latin/query",
+        "nav_url": "https://artflsrv03.uchicago.edu/philologic4/Latin/",
+    },
+    "Greek": {
+        "query_url": "https://artflsrv03.uchicago.edu/philologic4/Greek/query",
+        "nav_url": "https://artflsrv03.uchicago.edu/philologic4/Greek/",
+    },
+}
+
+# These will be set in main() based on --language
+BASE_QUERY_URL = LANG_CONFIG["Latin"]["query_url"]
+BASE_NAV_URL = LANG_CONFIG["Latin"]["nav_url"]
 
 TAG_RE = re.compile(r"<[^>]+>")
 HIGHLIGHT_RE = re.compile(
@@ -133,7 +153,7 @@ def extract_highlight_tokens(context_html: str) -> List[str]:
 
 
 def clean_context(context_html: str) -> str:
-    """Strip HTML tags, clean whitespace, and remove spaces before punctuation."""
+    """Strip HTML tags, clean whitespace, and tidy punctuation/quotes spacing."""
     # Remove tags
     text = TAG_RE.sub(" ", context_html)
     # Unescape HTML entities
@@ -143,6 +163,7 @@ def clean_context(context_html: str) -> str:
     text = text.strip()
     # Remove spaces before common punctuation (", . ; : ? !")
     text = re.sub(r"\s+([,.;:?!])", r"\1", text)
+    # Remove spaces immediately after an opening double quote “
     text = re.sub(r"“\s+", "“", text)
     return text
 
@@ -185,7 +206,7 @@ def build_passage_url(citation_links: Dict[str, str]) -> str:
     return urljoin(BASE_NAV_URL, raw)
 
 
-def extract_rows(data: Dict[str, Any], lemmas: List[str]) -> List[Dict[str, str]]:
+def extract_rows(data: Dict[str, Any], lemmas: List[str], language: str) -> List[Dict[str, str]]:
     """Turn a PhiloLogic JSON response into a list of CSV rows."""
     results = data.get("results", [])
     rows: List[Dict[str, str]] = []
@@ -235,7 +256,7 @@ def extract_rows(data: Dict[str, Any], lemmas: List[str]) -> List[Dict[str, str]
                     "SENTENCE": sentence,
                     "author": author,
                     "title": title,
-                    "language": "Latin",
+                    "language": language,
                     "passage": passage_url,
                 }
             )
@@ -264,28 +285,35 @@ def write_csv(rows: List[Dict[str, str]], output_path: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Extract Latin lemma contexts from Perseus / PhiloLogic into CSV."
+        description="Extract Latin/Greek lemma contexts from Perseus / PhiloLogic into CSV."
     )
     parser.add_argument(
         "lemmas",
         nargs="+",
-        help="Latin lemma(s) to search for (OR between them). Example: inspicio invideo",
+        help="Lemma(s) to search for (OR between them). Example: inspicio invideo or πόλις",
     )
     parser.add_argument(
         "-a",
         "--author",
-        help="Restrict to this author (as in metadata, e.g. 'Vergil').",
+        help="Restrict to this author (as in metadata, e.g. 'Vergil' or 'Xenophon').",
     )
     parser.add_argument(
         "-t",
         "--title",
-        help="Restrict to this work title (as in metadata, e.g. 'Aeneid').",
+        help="Restrict to this work title (as in metadata, e.g. 'Aeneid' or 'Anabasis').",
     )
     parser.add_argument(
         "-o",
         "--output",
         default="output.csv",
         help="Output CSV path (default: output.csv).",
+    )
+    parser.add_argument(
+        "-L",
+        "--language",
+        choices=["Latin", "Greek"],
+        default="Latin",
+        help="Corpus language: Latin or Greek (default: Latin).",
     )
     parser.add_argument(
         "-v",
@@ -299,7 +327,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    # Select the correct base URLs for the chosen language
+    cfg = LANG_CONFIG[args.language]
+    global BASE_QUERY_URL, BASE_NAV_URL
+    BASE_QUERY_URL = cfg["query_url"]
+    BASE_NAV_URL = cfg["nav_url"]
+
     if args.verbose:
+        print(f"Language: {args.language}", file=sys.stderr)
         print(f"Lemmas: {args.lemmas}", file=sys.stderr)
         if args.author:
             print(f"Author filter: {args.author}", file=sys.stderr)
@@ -337,7 +372,7 @@ def main() -> None:
     )
     data_full = fetch_json(params_full)
 
-    rows = extract_rows(data_full, args.lemmas)
+    rows = extract_rows(data_full, args.lemmas, args.language)
     write_csv(rows, args.output)
 
     # Simple output message with token count
