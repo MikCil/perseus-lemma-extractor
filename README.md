@@ -22,7 +22,7 @@ the tool:
 
 Columns:
 
-- `ID` – stable ID built from doc/line/token index + abbreviated author/work
+- `ID` – stable ID built from doc/passage/token index + abbreviated author/work
 - `TOKEN` – highlighted token surface form
 - `LEMMA` – lemma (or combined lemmas if multiple were queried)
 - `SENTENCE` – cleaned context
