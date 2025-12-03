@@ -12,39 +12,36 @@ Supports:
     ?report=concordance
     &method=proxy
     &colloc_filter_choice=frequency
-    &q=lemma:inspicio%20%7C%20lemma:invideo
-    &title=Aeneid
-    &author=Vergil
+    &q=lemma:aspicio
+    &title="Gallic War"
+    &author=Caesar
     &start=0
     &end=0
     &format=json
 
-- First query uses end=0 to discover results_length.
-- Second query uses end=<results_length> to get the full JSON.
+ID format
+---------
 
-For each hit, it extracts:
+The ID column is now based on the PhiloLogic citation structure:
 
-    ID        a stable ID derived from PhiloLogic ids + author/work codes
-    TOKEN     the highlighted token
-    LEMMA     the lemma (or lemmas) you searched for
-    SENTENCE  cleaned context text (HTML stripped, spacing normalized)
-    author    metadata_fields["author"]
-    title     metadata_fields["title"]
-    language  "Latin" or "Greek"
-    passage   a clickable URL (paragraph-level, with byte)
+    doc_id.div1.div2.div3.byte_DocLabel
 
-Usage examples:
+where:
 
-    # Latin, one lemma, all authors/works
-    python philologic_lemmas_to_csv.py inspicio -o inspicio_all.csv
+    doc_id   = metadata_fields["philo_doc_id"] or first element of philo_id
+    div1-3   = up to three division labels from result["citation"]
+               with object_type "div1", "div2", "div3"
+    byte     = the "byte=" parameter extracted from any citation href
+               (or citation_links as fallback)
+    DocLabel = citation[0]["label"] (usually something like "Caes. Gal.")
+               with whitespace removed, e.g. "Caes.Gal."
 
-    # Latin, multiple lemmas (OR), restricted to Vergil's Aeneid
-    python philologic_lemmas_to_csv.py inspicio invideo \\
-        -a Vergil -t Aeneid -o aeneid_inspicio_invideo.csv
+Example:
 
-    # Greek, lemma πόλις, Xenophon Anabasis
-    python philologic_lemmas_to_csv.py πόλις \\
-        -a Xenophon -t Anabasis -L Greek -o polis_xen_anabasis.csv
+    77.5.14.2.636137_Caes.Gal.
+
+For each JSON result, all highlighted tokens share this same ID (the ID
+identifies the specific cited passage/hit).
 """
 
 import argparse
@@ -168,17 +165,6 @@ def clean_context(context_html: str) -> str:
     return text
 
 
-def abbreviate_word(word: str, length: int = 3) -> str:
-    """
-    Create a simple alphabetic abbreviation (e.g. 'Cicero' -> 'Cic',
-    'Aeneid' -> 'Aen').
-    """
-    letters_only = re.sub(r"[^A-Za-z]+", "", word)
-    if not letters_only:
-        return ""
-    return letters_only[:length]
-
-
 def build_passage_url(citation_links: Dict[str, str]) -> str:
     """
     Build a clickable passage URL from citation_links.
@@ -187,9 +173,6 @@ def build_passage_url(citation_links: Dict[str, str]) -> str:
       1. paragraph level ('para'), reshaped as ".../para_path/?byte=..."
       2. line ('line')
       3. doc ('doc')
-
-    The main fix is (1): paragraph-level URL + ?byte=...,
-    e.g. navigate/181/1/26/1/1/?byte=77098
     """
     raw = citation_links.get("para") or citation_links.get("line") or citation_links.get("doc")
     if not raw:
@@ -204,6 +187,79 @@ def build_passage_url(citation_links: Dict[str, str]) -> str:
         raw = f"{path}?{query}"
 
     return urljoin(BASE_NAV_URL, raw)
+
+
+def build_unique_id(result: Dict[str, Any]) -> str:
+    """
+    Build an ID of the form:
+
+        doc_id.div1.div2.div3.byte_DocLabel
+
+    using data from result["metadata_fields"] and result["citation"].
+
+    Example:
+        77.5.14.2.636137_Caes.Gal.
+    """
+    metadata = result.get("metadata_fields") or {}
+    doc_id = str(metadata.get("philo_doc_id", "")).strip()
+
+    # Fallback: first element of philo_id
+    if not doc_id:
+        philo_id = result.get("philo_id")
+        if isinstance(philo_id, list) and philo_id:
+            doc_id = str(philo_id[0])
+
+    citation = result.get("citation") or []
+    doc_label = ""
+    div_labels: List[str] = []
+    byte = ""
+
+    for cit in citation:
+        obj_type = (cit.get("object_type") or "").lower()
+        label = (cit.get("label") or "").strip()
+
+        if obj_type == "doc" and label and not doc_label:
+            doc_label = label
+
+        if obj_type.startswith("div") and label:
+            div_labels.append(label)
+
+        href = cit.get("href") or ""
+        if not byte and href:
+            m = re.search(r"byte=(\d+)", href)
+            if m:
+                byte = m.group(1)
+
+    # Only keep up to three structural labels (e.g. 5.14.2)
+    div_labels = div_labels[:3]
+
+    # Fallback for byte: look in citation_links
+    if not byte:
+        citation_links = result.get("citation_links") or {}
+        for key in ("para", "line", "doc"):
+            href = citation_links.get(key) or ""
+            m = re.search(r"byte=(\d+)", href)
+            if m:
+                byte = m.group(1)
+                break
+
+    parts: List[str] = []
+    if doc_id:
+        parts.append(doc_id)
+    parts.extend(div_labels)
+    if byte:
+        parts.append(byte)
+
+    base_id = ".".join(parts)
+
+    if doc_label:
+        # Remove whitespace inside label: "Caes. Gal." -> "Caes.Gal."
+        doc_label_clean = re.sub(r"\s+", "", doc_label)
+        if base_id:
+            return f"{base_id}_{doc_label_clean}"
+        return doc_label_clean
+
+    return base_id
 
 
 def extract_rows(data: Dict[str, Any], lemmas: List[str], language: str) -> List[Dict[str, str]]:
@@ -227,27 +283,18 @@ def extract_rows(data: Dict[str, Any], lemmas: List[str], language: str) -> List
         metadata = result.get("metadata_fields", {}) or {}
         author = (metadata.get("author") or "").strip()
         title = (metadata.get("title") or "").strip()
-        doc_id = (metadata.get("philo_doc_id") or "").strip()
-        line_n = (metadata.get("n") or "").strip()
-
-        author_code = abbreviate_word(author or "Unknown")
-        title_code = abbreviate_word(title or "Work")
 
         citation_links = result.get("citation_links", {}) or {}
         passage_url = build_passage_url(citation_links)
+
+        unique_id = build_unique_id(result)
 
         # Guarantee at least one row per result; if no highlight spans were found,
         # we still store one row with an empty TOKEN.
         if not tokens:
             tokens = [""]
 
-        for idx, token in enumerate(tokens, start=1):
-            # Stable ID: docId.lineNumber.tokenIndex + short author/title codes
-            # e.g. "181.387.1Verg_Aen"
-            id_core = f"{doc_id}.{line_n}.{idx}."
-            id_suffix = f"{author_code}_{title_code}" if author_code or title_code else ""
-            unique_id = f"{id_core}{id_suffix}"
-
+        for token in tokens:
             rows.append(
                 {
                     "ID": unique_id,
@@ -290,17 +337,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "lemmas",
         nargs="+",
-        help="Lemma(s) to search for (OR between them). Example: inspicio invideo or πόλις",
+        help="Lemma(s) to search for (OR between them). Example: aspicio or πόλις",
     )
     parser.add_argument(
         "-a",
         "--author",
-        help="Restrict to this author (as in metadata, e.g. 'Vergil' or 'Xenophon').",
+        help="Restrict to this author (as in metadata, e.g. 'Caesar' or 'Xenophon').",
     )
     parser.add_argument(
         "-t",
         "--title",
-        help="Restrict to this work title (as in metadata, e.g. 'Aeneid' or 'Anabasis').",
+        help="Restrict to this work title (as in metadata, e.g. 'Gallic War' or 'Anabasis').",
     )
     parser.add_argument(
         "-o",
